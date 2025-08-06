@@ -1,5 +1,4 @@
 import { pipeline, env } from '@huggingface/transformers';
-import { SentimentAnalyzer, PorterStemmer, WordTokenizer } from 'natural';
 
 // Configure transformers.js
 env.allowLocalModels = false;
@@ -19,7 +18,7 @@ interface AnalysisResult {
 
 class FakeNewsDetector {
   private classifier: any = null;
-  private sentimentAnalyzer: any = null;
+  private sentimentClassifier: any = null;
   private initialized = false;
 
   async initialize() {
@@ -35,8 +34,12 @@ class FakeNewsDetector {
         { device: 'webgpu' }
       );
 
-      // Initialize sentiment analyzer
-      this.sentimentAnalyzer = new SentimentAnalyzer('English', PorterStemmer, 'afinn');
+      // Initialize sentiment analysis pipeline
+      this.sentimentClassifier = await pipeline(
+        'sentiment-analysis',
+        'Xenova/distilbert-base-uncased-finetuned-sst-2-english',
+        { device: 'webgpu' }
+      );
       
       this.initialized = true;
       console.log('ML models initialized successfully');
@@ -47,6 +50,10 @@ class FakeNewsDetector {
         this.classifier = await pipeline(
           'text-classification',
           'onnx-community/roberta-base-openai-detector'
+        );
+        this.sentimentClassifier = await pipeline(
+          'sentiment-analysis',
+          'Xenova/distilbert-base-uncased-finetuned-sst-2-english'
         );
         this.initialized = true;
       } catch (fallbackError) {
@@ -66,8 +73,8 @@ class FakeNewsDetector {
       const classificationResult = await this.classifier(text);
       const mlScore = this.interpretClassificationResult(classificationResult);
 
-      // 2. Sentiment Analysis
-      const sentimentScore = this.analyzeSentiment(text);
+      // 2. Sentiment Analysis using Hugging Face
+      const sentimentScore = await this.analyzeSentiment(text);
 
       // 3. Linguistic Pattern Analysis
       const linguisticPatterns = this.analyzeLinguisticPatterns(text);
@@ -77,7 +84,7 @@ class FakeNewsDetector {
       const credibilityFactors = this.assessCredibility(text);
 
       // 5. Combine all factors for final decision
-      const finalScore = this.combineScores(mlScore, sentimentScore, linguisticPatterns, biasIndicators, credibilityFactors);
+      const finalScore = await this.combineScores(mlScore, sentimentScore, linguisticPatterns, biasIndicators, credibilityFactors);
       
       const isReal = finalScore.score > 0.5;
       const confidence = Math.round(Math.abs(finalScore.score - 0.5) * 200); // Convert to percentage
@@ -112,14 +119,19 @@ class FakeNewsDetector {
     return 0.5; // Neutral if no clear result
   }
 
-  private analyzeSentiment(text: string): number {
-    const tokenizer = new WordTokenizer();
-    const tokens = tokenizer.tokenize(text.toLowerCase()) || [];
-    const stemmedTokens = tokens.map(token => PorterStemmer.stem(token));
-    const sentiment = this.sentimentAnalyzer.getSentiment(stemmedTokens);
-    
-    // Normalize sentiment score to 0-1 range
-    return (sentiment + 5) / 10; // AFINN scores range from -5 to 5
+  private async analyzeSentiment(text: string): Promise<number> {
+    try {
+      const result = await this.sentimentClassifier(text);
+      if (Array.isArray(result) && result.length > 0) {
+        const sentiment = result[0];
+        // Convert sentiment to 0-1 scale (0 = negative, 1 = positive)
+        return sentiment.label === 'POSITIVE' ? sentiment.score : 1 - sentiment.score;
+      }
+      return 0.5; // Neutral if no result
+    } catch (error) {
+      console.error('Sentiment analysis error:', error);
+      return 0.5; // Return neutral on error
+    }
   }
 
   private analyzeLinguisticPatterns(text: string): string[] {
@@ -248,13 +260,13 @@ class FakeNewsDetector {
     return factors;
   }
 
-  private combineScores(
+  private async combineScores(
     mlScore: number,
     sentimentScore: number,
     linguisticPatterns: string[],
     biasIndicators: string[],
     credibilityFactors: string[]
-  ): { score: number; reasoning: string[] } {
+  ): Promise<{ score: number; reasoning: string[] }> {
     let finalScore = mlScore * 0.4; // ML model gets 40% weight
     
     // Sentiment analysis (20% weight)
