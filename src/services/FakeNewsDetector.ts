@@ -27,17 +27,17 @@ class FakeNewsDetector {
     try {
       console.log('Initializing ML models...');
       
-      // Initialize text classification pipeline with a model trained on fake news detection
+      // Initialize text classification pipeline with a model better suited for fake news detection
       this.classifier = await pipeline(
         'text-classification',
-        'onnx-community/roberta-base-openai-detector',
+        'martin-ha/toxic-comment-model',
         { device: 'webgpu' }
       );
 
       // Initialize sentiment analysis pipeline
       this.sentimentClassifier = await pipeline(
         'sentiment-analysis',
-        'Xenova/distilbert-base-uncased-finetuned-sst-2-english',
+        'cardiffnlp/twitter-roberta-base-sentiment-latest',
         { device: 'webgpu' }
       );
       
@@ -49,11 +49,11 @@ class FakeNewsDetector {
       try {
         this.classifier = await pipeline(
           'text-classification',
-          'onnx-community/roberta-base-openai-detector'
+          'martin-ha/toxic-comment-model'
         );
         this.sentimentClassifier = await pipeline(
           'sentiment-analysis',
-          'Xenova/distilbert-base-uncased-finetuned-sst-2-english'
+          'cardiffnlp/twitter-roberta-base-sentiment-latest'
         );
         this.initialized = true;
       } catch (fallbackError) {
@@ -109,11 +109,15 @@ class FakeNewsDetector {
   private interpretClassificationResult(result: any): number {
     if (Array.isArray(result) && result.length > 0) {
       const topResult = result[0];
-      // Assuming the model returns 'FAKE' and 'REAL' labels
-      if (topResult.label === 'REAL' || topResult.label === 'Human') {
-        return topResult.score;
+      console.log('Classification result:', topResult);
+      
+      // The toxic comment model classifies content - high toxicity indicates potential fake news
+      if (topResult.label === 'TOXIC') {
+        // Higher toxicity score means more likely to be fake news
+        return 1 - (topResult.score * 0.8); // Reduce impact to 80%
       } else {
-        return 1 - topResult.score;
+        // Non-toxic content is more likely to be legitimate
+        return 0.6 + (topResult.score * 0.3); // Base credibility with bonus
       }
     }
     return 0.5; // Neutral if no clear result
@@ -124,8 +128,16 @@ class FakeNewsDetector {
       const result = await this.sentimentClassifier(text);
       if (Array.isArray(result) && result.length > 0) {
         const sentiment = result[0];
-        // Convert sentiment to 0-1 scale (0 = negative, 1 = positive)
-        return sentiment.label === 'POSITIVE' ? sentiment.score : 1 - sentiment.score;
+        console.log('Sentiment result:', sentiment);
+        
+        // Handle the new model's labels: LABEL_0 (negative), LABEL_1 (neutral), LABEL_2 (positive)
+        if (sentiment.label === 'LABEL_2') {
+          return sentiment.score; // Positive sentiment
+        } else if (sentiment.label === 'LABEL_0') {
+          return 1 - sentiment.score; // Negative sentiment (inverted)
+        } else {
+          return 0.5; // Neutral sentiment
+        }
       }
       return 0.5; // Neutral if no result
     } catch (error) {
