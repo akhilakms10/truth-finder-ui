@@ -5,34 +5,61 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { FileText, Link2, Image, CheckCircle, XCircle, Shield, Zap, Brain } from 'lucide-react';
+import { FileText, Link2, Image, CheckCircle, XCircle, Shield, Zap, Brain, AlertCircle } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
 import heroBackground from '@/assets/hero-background.jpg';
+import { fakeNewsDetector } from '@/services/FakeNewsDetector';
 
 const HeroSection = () => {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('text');
   const [textInput, setTextInput] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
 
-  const simulateAnalysis = () => {
+  const performAnalysis = async () => {
     setIsAnalyzing(true);
+    setIsInitializing(true);
     
-    // Simulate API call delay
-    setTimeout(() => {
-      const isReal = Math.random() > 0.5;
-      const confidence = Math.floor(Math.random() * 30) + 70; // 70-99%
+    try {
+      let result;
       
-      setAnalysisResult({
-        isReal,
-        confidence,
-        explanation: isReal 
-          ? 'This content appears to be factually accurate based on reliable sources and fact-checking algorithms.'
-          : 'This content contains misleading information that contradicts verified facts from trusted sources.'
+      if (activeTab === 'text' && textInput.trim()) {
+        if (textInput.trim().length < 50) {
+          throw new Error('Please provide more text for accurate analysis (minimum 50 characters)');
+        }
+        result = await fakeNewsDetector.analyzeText(textInput);
+      } else if (activeTab === 'url' && urlInput.trim()) {
+        result = await fakeNewsDetector.analyzeUrl(urlInput);
+      } else if (activeTab === 'image' && imageFile) {
+        result = await fakeNewsDetector.analyzeImage(imageFile);
+      } else {
+        throw new Error('Please provide input for analysis');
+      }
+      
+      setAnalysisResult(result);
+      
+      toast({
+        title: "Analysis Complete",
+        description: `Content classified as ${result.isReal ? 'REAL' : 'FAKE'} with ${result.confidence}% confidence`,
+        duration: 3000,
       });
+      
+    } catch (error) {
+      console.error('Analysis error:', error);
+      toast({
+        title: "Analysis Failed",
+        description: error instanceof Error ? error.message : 'Failed to analyze content. Please try again.',
+        variant: "destructive",
+        duration: 5000,
+      });
+    } finally {
       setIsAnalyzing(false);
-    }, 2000);
+      setIsInitializing(false);
+    }
   };
 
   const resetAnalysis = () => {
@@ -171,7 +198,7 @@ const HeroSection = () => {
                   )}
 
                   <Button
-                    onClick={simulateAnalysis}
+                    onClick={performAnalysis}
                     disabled={isAnalyzing || (
                       (activeTab === 'text' && !textInput.trim()) ||
                       (activeTab === 'url' && !urlInput.trim()) ||
@@ -180,7 +207,7 @@ const HeroSection = () => {
                     size="xl"
                     className="w-full animate-pulse-glow"
                   >
-                    {isAnalyzing ? 'Analyzing...' : 'Analyze Now'}
+                    {isInitializing ? 'Loading AI Models...' : isAnalyzing ? 'Analyzing with AI...' : 'Analyze with AI'}
                   </Button>
                 </div>
               </CardContent>
@@ -218,11 +245,57 @@ const HeroSection = () => {
                     )}
                   </div>
 
-                  <div className="bg-white/20 rounded-lg p-4 backdrop-blur-md">
-                    <h3 className="text-white font-semibold mb-2">Analysis Explanation</h3>
+                  <div className="bg-white/20 rounded-lg p-4 backdrop-blur-md space-y-3">
+                    <h3 className="text-white font-semibold mb-2">AI Analysis Explanation</h3>
                     <p className="text-gray-200 text-sm">
                       {analysisResult.explanation}
                     </p>
+                    
+                    {analysisResult.details && (
+                      <div className="space-y-2">
+                        {analysisResult.details.biasIndicators.length > 0 && (
+                          <div className="bg-destructive/20 rounded p-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              <AlertCircle className="h-4 w-4 text-destructive" />
+                              <span className="text-destructive text-xs font-medium">Warning Signs</span>
+                            </div>
+                            <ul className="text-xs text-gray-300 list-disc list-inside">
+                              {analysisResult.details.biasIndicators.map((indicator: string, index: number) => (
+                                <li key={index}>{indicator}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        
+                        {analysisResult.details.credibilityFactors.length > 0 && (
+                          <div className="bg-success/20 rounded p-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              <CheckCircle className="h-4 w-4 text-success" />
+                              <span className="text-success text-xs font-medium">Credibility Factors</span>
+                            </div>
+                            <ul className="text-xs text-gray-300 list-disc list-inside">
+                              {analysisResult.details.credibilityFactors.map((factor: string, index: number) => (
+                                <li key={index}>{factor}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        
+                        {analysisResult.details.linguisticPatterns.length > 0 && (
+                          <div className="bg-warning/20 rounded p-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Brain className="h-4 w-4 text-warning" />
+                              <span className="text-warning text-xs font-medium">Linguistic Analysis</span>
+                            </div>
+                            <ul className="text-xs text-gray-300 list-disc list-inside">
+                              {analysisResult.details.linguisticPatterns.map((pattern: string, index: number) => (
+                                <li key={index}>{pattern}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <Button variant="outline" onClick={resetAnalysis} className="text-white border-white/30">
